@@ -1,0 +1,17 @@
+Requirements:
+1. Use interrupts
+2. Use a ring buffer
+
+Driver:
+1. Setup a skeleton kernel driver
+2. Adapt this driver
+3. Read from IO
+4. Interrupt from IO (GPIO_157 - BB expansion 22)
+5. Timestamp using system tick counter (is this fast enough?)
+6. Add rate of change to each channel
+7. Autodetect number of channels
+
+Application:
+1. Read driver and output current values
+2.
+
