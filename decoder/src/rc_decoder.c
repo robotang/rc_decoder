@@ -12,6 +12,9 @@
 
 #include <asm/uaccess.h>
 
+#include "timestamp.h"
+#include "decoder.h"
+
 /*
  * rc_decoder_read is the function called when a process calls read() on
  * /dev/rc_decoder.  It writes "rc_decoder, world!" to the buffer passed in the
