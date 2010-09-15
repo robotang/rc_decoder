@@ -1,1 +1,0 @@
-KERNEL=="rc_decoder", SYMLINK+="rc_decoder", MODE="0444"
