@@ -1,0 +1,15 @@
+Requirements:
+1. Use interrupts
+2. Use a ring buffer
+
+Driver:
+1. Setup a skeleton kernel driver. --Done
+2. Adapt this driver. --Done
+3. Setup IO. --Done
+4. Toggle output. --Done
+5. Read from IO. --Done
+6. Interrupt from IO (GPIO_144 - BB expansion 4, Overo Summit expansion 30). --Done
+7. Timestamp using system tick counter (is this fast enough?) --Done
+8. Add ring buffer.
+9. Add rate of change to each channel
+10. Autodetect number of channels --Done

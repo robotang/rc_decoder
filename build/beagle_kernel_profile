@@ -1,0 +1,39 @@
+if [[ -n "${OVEROTOP}" ]]; then
+    if [[ -z "${KERNEL_CROSS_BUILD_ENVIRONMENT_SOURCED}" ]]; then
+
+        # should work for MACHINE=beagleboard also, you will have to set OETMP correctly
+        MACHINE=beagleboard
+
+        # Set OETMP to be your OE config TMPDIR. This is a configurable param for OE. 
+
+        # For gumstix setups, look in ${OVEROTOP}/build/conf/site.conf
+        # This is the gumstix default.
+        OETMP=${OVEROTOP}/tmp
+
+        # For beagleboard setups, look in ${OETREE}/build/conf/local.conf
+        # This is the beagleboard default.
+        # OETMP=${OETREE}/tmp
+
+        SYSROOTSDIR=${OETMP}/sysroots
+        STAGEDIR=${SYSROOTSDIR}/`uname -m`-linux/usr
+
+        export KERNELDIR=${SYSROOTSDIR}/${MACHINE}-angstrom-linux-gnueabi/kernel
+
+        PATH=${STAGEDIR}/bin:${PATH}
+        PATH=${STAGEDIR}/armv7a/bin:${PATH}
+
+        unset CFLAGS CPPFLAGS CXXFLAGS LDFLAGS MACHINE
+
+        export ARCH="arm"
+        export CROSS_COMPILE="arm-angstrom-linux-gnueabi-"
+        export CC="arm-angstrom-linux-gnueabi-gcc"
+        export LD="arm-angstrom-linux-gnueabi-ld"
+        export KERNEL_CROSS_BUILD_ENVIRONMENT_SOURCED="true"
+
+	    echo "Altered environment for cross building a kernel module with OE tools."
+    else
+	    echo "Cross build environment already configured."
+    fi
+else
+    echo "*** \$OVEROTOP is undefined! Source your profile"
+fi
