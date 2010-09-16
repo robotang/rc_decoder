@@ -10,6 +10,9 @@ Driver:
 5. Read from IO. --Done
 6. Interrupt from IO (GPIO_144 - BB expansion 4, Overo Summit expansion 30). --Done
 7. Timestamp using system tick counter (is this fast enough?) --Done
-8. Add ring buffer.
-9. Add rate of change to each channel
+8. Add ring buffer. --Done
+9. Add rate of change to each channel --Do this in user space perhaps?
 10. Autodetect number of channels --Done
+11. Timer overflow isr to indicate OK, LOST, REALLY_LOST --Done.
+12. Tidy up code. Perhaps use some of the routines specific to omap rather than ioremap / iowrite / ioread etc?
+13. Comment code.

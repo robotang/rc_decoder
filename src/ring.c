@@ -4,7 +4,7 @@
     @brief  Ring buffer implementation.
 */
 
-#include <string.h>
+#include <linux/string.h>
 #include "ring.h"
 
 /** Define some useful macros for determining number of entries in
