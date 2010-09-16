@@ -1,9 +1,5 @@
 ifneq ($(KERNELRELEASE),)
-    obj-m += ring.o
-    obj-m += rc.o
-    obj-m += rc_decoder.o
-    rc_decoder-objs := ring.o rc.o 
-    
+    obj-m := timer.o
 else
     KERNELDIR ?= /lib/modules/$(shell uname -r)/build
     PWD := $(shell pwd)

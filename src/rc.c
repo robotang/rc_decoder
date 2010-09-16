@@ -12,13 +12,13 @@
 			with an internal timer. Firstly, it automatically 
 			detects the number of channels in the PPM signal, and 
 			then decodes the signal. Each time the module is read, 
-			it will output the value of each channel, separated with
-			 a space, and null terminated. e.g. (using a test 
+			It puts the status ("OK", LOST", or "REALLY_LOST"),
+			followed by the value of each channel, separated with
+			 a space, and null terminated. . e.g. (using a test 
 			 signal): "cat /dev/rc returns" 
-			 102 199 295 392 488 585 681 777 
+			 OK 102 199 295 392 488 585 681 777
 
-			TODO: Explicitly set the clock speed into the timer using PRCM			
-			TODO: Incorporate a ring buffer into the system
+			TODO: Right now it assumes SYS_CLK = 13MHz. Fix this assumption!
 			TODO: Test on a proper PPM signal
 */
 
@@ -31,33 +31,37 @@
 #include <linux/cdev.h>
 #include <linux/fs.h>
 #include <linux/gpio.h>
+#include <linux/clk.h>	
 #include <linux/miscdevice.h>
 #include <mach/gpio.h>
+#include <plat/dmtimer.h>
 #include <asm/io.h>
 #include <asm/uaccess.h>
 #include <plat/mux.h>
 #include "rc.h"
+#include "ring.h"
 
 #define RC_DEV_NAME				"rc"
 #define RC_PAD_ADDR				(0x2174 + 0x48000000 - OMAP34XX_PADCONF_START) /* This is GPIO_144 */
 #define RC_PAD_BIT				16 /* 144 - 128 = 16 */
 #define RC_PAD_NUM				144
 #define RC_PAD_BASE				OMAP34XX_GPIO5_REG_BASE /* Note: RC_PAD is GPIO_144 -> GPIO group 5 */
-#define RC_GPTIMER_NUM				8
-#define RC_GPTIMER_BASE				GPTIMER8
 
 #define PPM_START_MIN_10US			1000 /* i.e. 10ms. TODO: This value may need to be adjusted */			
 #define PPM_START_MAX_10US			4000 /* i.e. 40ms, TODO: This value may need to be adjusted */			
+#define PRESCALE_DIV32				32
+#define TIMER_PRESCALE_DIV32			4 
 
 #define USER_BUFF_SIZE				128
 
-typedef enum {B_FALSE = 0, B_TRUE} bool_t;
+#define REALLY_LOST				5 /*TODO: This value may need to be adjusted */
 
 typedef enum {DETECT_CHANNELS = 0, DECODE_PPM } rc_mode_t;
 
 typedef struct 
 {
-	unsigned int val;
+	char buffer[128];
+	ring_t ring;
 } rc_channel_t;
 
 typedef struct 
@@ -65,7 +69,11 @@ typedef struct
 	unsigned int padconf_reg; /* Store the value of this reg so it can later be returned */
 	unsigned int gpio_oe_reg; /* Store the value of this reg so it can later be returned */
 	unsigned int gpt_tclr_reg; /* Store the value of this reg so it can later be returned */
-	unsigned int irq;
+	unsigned int ppm_irq;
+	unsigned int timer_irq;
+	unsigned int timer_zero_val;
+	unsigned int lost_counter;
+	struct omap_dm_timer *timer_ptr;
 	unsigned int num_channels;
 	rc_channel_t *channel; /* Dynamically allocated */
 	rc_mode_t mode;
@@ -77,14 +85,33 @@ static rc_dev_t rc_dev;
 
 static ssize_t rc_read(struct file * file, char * buf, size_t count, loff_t *ppos)
 {	 
-	int len, i;
+	int len, i, j;
 	
 	rc_dev.user_buff[0] = '\0';
+	
+	/* Status */
+	j = strlen(rc_dev.user_buff);
+	if(rc_dev.lost_counter == 0)
+	{
+		snprintf(rc_dev.user_buff + j, USER_BUFF_SIZE, "OK ");
+	}
+	else if(rc_dev.lost_counter < REALLY_LOST)
+	{
+		snprintf(rc_dev.user_buff + j, USER_BUFF_SIZE, "LOST ");
+	}
+	else /* REALLY_LOST */
+	{
+		snprintf(rc_dev.user_buff + j, USER_BUFF_SIZE, "REALLY_LOST ");
+	}
+	
+	/* Values */
 	for(i = 0; i < rc_dev.num_channels; i++)
 	{
-		int j = strlen(rc_dev.user_buff);
-		snprintf(rc_dev.user_buff + j, USER_BUFF_SIZE, "%d ", rc_dev.channel[i].val); 
-	}	
+		int val;
+		j = strlen(rc_dev.user_buff);
+		ring_read(&rc_dev.channel[i].ring, &val, sizeof(val));
+		snprintf(rc_dev.user_buff + j, USER_BUFF_SIZE, "%d ", val);
+	}
 	
 	len = strlen(rc_dev.user_buff);
 	if(count < len)
@@ -113,25 +140,25 @@ static struct miscdevice rc_misc_dev =
 
 static unsigned int delta_10us(void)
 {
-	void __iomem *base;
-	unsigned int reg;
+	unsigned int reg = omap_dm_timer_read_counter(rc_dev.timer_ptr) - rc_dev.timer_zero_val;
+	//printk("reg: %d\n", reg);
+	omap_dm_timer_write_counter(rc_dev.timer_ptr, rc_dev.timer_zero_val);
 
-	base = ioremap(RC_GPTIMER_BASE, GPT_REGS_PAGE_SIZE);
-	if(base == NULL)
-	{
-		printk(KERN_ERR "ioremap(PADCONF) failed\n");
-		return -1;
-	}
-	/* Read timer */
-	reg = ioread32(base + GPT_TCRR);
-	/* Zero the timer */
-	iowrite32(0x00000000, base + GPT_TCRR);	
-	iounmap(base);
-	
 	return reg >> 2; /* Approx (actually should be divided by 4.0625 rather than 4! Note 13MHz/DIV32 = 406250Hz */
 }
 
-static irqreturn_t interrupt_handler(void)
+/* This isr is designed to overflow at 1Hz */
+static irqreturn_t timer_interrupt_handler(int irq, void *dev_id)
+{
+	/* Reset the timer interrupt status */
+	omap_dm_timer_write_status(rc_dev.timer_ptr, OMAP_TIMER_INT_OVERFLOW);
+	omap_dm_timer_read_status(rc_dev.timer_ptr);
+	/* Increment the lost count, in seconds */
+	rc_dev.lost_counter++;
+	return IRQ_HANDLED;
+}
+
+static irqreturn_t ppm_interrupt_handler(int irq, void *dev_id)
 {
 	static int pulse = 0;
 	unsigned int dt = delta_10us();
@@ -154,6 +181,7 @@ static irqreturn_t interrupt_handler(void)
 		{
 			if(pulse > 0) /* Have received a second start pulse -> change mode */
 			{
+				int i;
 				rc_dev.num_channels = pulse - 1;
 				rc_dev.channel = kmalloc(rc_dev.num_channels * sizeof(rc_channel_t), GFP_KERNEL); /* Allocate memory for channels */
 				if(rc_dev.channel == NULL)
@@ -162,6 +190,12 @@ static irqreturn_t interrupt_handler(void)
 					return -1;
 				}
 				rc_dev.mode = DECODE_PPM;
+				rc_dev.lost_counter = 0;
+				for(i = 0; i < rc_dev.num_channels; i++)
+				{
+					ring_init(&rc_dev.channel[i].ring, rc_dev.channel[i].buffer, sizeof(rc_dev.channel[i].buffer));
+				}
+				
 				pulse = 0;
 			}
 			else
@@ -182,14 +216,14 @@ static irqreturn_t interrupt_handler(void)
 		}
 		else if(pulse < rc_dev.num_channels)
 		{
-			rc_dev.channel[pulse++].val = dt;
+			ring_write(&rc_dev.channel[pulse++].ring, &dt, sizeof(dt));
 		}
 	}
 	
 	return IRQ_HANDLED;
 }
 
-static int rc_hardware_init(bool_t enable)
+static int rc_hardware_init(bool enable)
 {
 	void __iomem *base;
 	
@@ -200,7 +234,7 @@ static int rc_hardware_init(bool_t enable)
 		printk(KERN_ERR "ioremap(PADCONF) failed\n");
 		return -1;
 	}
-	if(enable == B_TRUE)
+	if(enable)
 	{
 		rc_dev.padconf_reg = ioread16(base + RC_PAD_ADDR);
 		iowrite16(PADCONF_IEN | PADCONF_PULL_UP | PADCONF_PULL_EN | PADCONF_GPIO_MODE, base + RC_PAD_ADDR);
@@ -218,7 +252,7 @@ static int rc_hardware_init(bool_t enable)
 		printk(KERN_ERR "ioremap(GPIO_OE) failed\n");
 		return -1;
 	}
-	if(enable == B_TRUE) 
+	if(enable) 
 	{
 		rc_dev.gpio_oe_reg = ioread32(base + GPIO_OE_REG_OFFSET);
 		iowrite32(rc_dev.gpio_oe_reg & (~(0 << RC_PAD_BIT)), base + GPIO_OE_REG_OFFSET); 
@@ -230,58 +264,74 @@ static int rc_hardware_init(bool_t enable)
 	}
 	iounmap(base);
 	
-	/* Configure timer. TODO: Setup clock into timer via PRCM */
-	base = ioremap(RC_GPTIMER_BASE, GPT_REGS_PAGE_SIZE);
-	if(base == NULL)
+	/* Configure timer and its overflow interrupt */
+	if(enable)
 	{
-		printk(KERN_ERR "ioremap(GPT) failed\n");
-		return -1;
-	}
-	if(enable == B_TRUE)
-	{
-		rc_dev.gpt_tclr_reg = ioread32(base + GPT_TCLR);
-		iowrite32(GPT_TCLR_ST_START | GPT_TCLR_PRESCALE_EN | GPT_TCLR_PS_DIV32, base + GPT_TCLR);
+		struct clk *gt_fclk;
+		rc_dev.timer_ptr = omap_dm_timer_request();
+		if(rc_dev.timer_ptr == NULL)
+		{
+			printk(KERN_ERR "omap_dm_timer_request failed\n");
+			return -1;	
+		}
+		
+		omap_dm_timer_set_source(rc_dev.timer_ptr, OMAP_TIMER_SRC_SYS_CLK);
+		omap_dm_timer_set_prescaler(rc_dev.timer_ptr, TIMER_PRESCALE_DIV32);
+		rc_dev.timer_irq = omap_dm_timer_get_irq(rc_dev.timer_ptr);
+		
+		if(request_irq(rc_dev.timer_irq, timer_interrupt_handler, IRQF_DISABLED | IRQF_TIMER , RC_DEV_NAME, timer_interrupt_handler))
+		{
+			printk(KERN_ERR "request_irq failed (timer)\n");
+			return -1;
+		}
+		gt_fclk = omap_dm_timer_get_fclk(rc_dev.timer_ptr);
+		rc_dev.timer_zero_val = 0xFFFFFFFF - (clk_get_rate(gt_fclk) / PRESCALE_DIV32);
+		omap_dm_timer_set_load(rc_dev.timer_ptr, 1, rc_dev.timer_zero_val);
+		omap_dm_timer_set_int_enable(rc_dev.timer_ptr, OMAP_TIMER_INT_OVERFLOW);
+		omap_dm_timer_start(rc_dev.timer_ptr);
 	}
 	else
 	{
-		iowrite32(rc_dev.gpt_tclr_reg, base + GPT_TCLR);
+		omap_dm_timer_stop(rc_dev.timer_ptr);
+		free_irq(rc_dev.timer_irq, timer_interrupt_handler); 
+		omap_dm_timer_free(rc_dev.timer_ptr);
 	}
-	iounmap(base);
 
 	/* Configure interrupt */
-	if(enable == B_TRUE)
+	if(enable)
 	{
-		if(request_irq(rc_dev.irq, interrupt_handler, IRQF_TRIGGER_FALLING, RC_DEV_NAME, &rc_dev))
+		if(request_irq(rc_dev.ppm_irq, ppm_interrupt_handler, IRQF_TRIGGER_FALLING, RC_DEV_NAME, &rc_dev))
 		{
-			printk(KERN_ERR "request_irq failed\n");
+			printk(KERN_ERR "request_irq failed (io)\n");
 			return -1;
 		}
 	}
 	else
 	{
-		free_irq(rc_dev.irq, &rc_dev); 
+		free_irq(rc_dev.ppm_irq, &rc_dev); 
 	}
 	
 	return 0;
 }
 
 static int __init rc_init(void)
-{		
+{
 	unsigned int ret = misc_register(&rc_misc_dev);
-	if (ret)
+	if(ret)
 	{
 		printk(KERN_ERR "Unable to register \"rc\" misc device\n");
 		return -1;
 	}
 	
 	/* Setup rc_dev structure */
-	rc_dev.irq = gpio_to_irq(RC_PAD_NUM);
+	rc_dev.ppm_irq = gpio_to_irq(RC_PAD_NUM);
 	rc_dev.num_channels = 0;
 	rc_dev.channel = NULL;
 	rc_dev.mode = DETECT_CHANNELS;
+	rc_dev.lost_counter = 0;
 
 	/* Setup hardware */
-	ret = rc_hardware_init(B_TRUE);
+	ret = rc_hardware_init(true);
 	
 	return ret;
 }
@@ -290,7 +340,7 @@ static void __exit rc_exit(void)
 {
 	misc_deregister(&rc_misc_dev);	
 	/* Return RC_PAD to its original state */
-	rc_hardware_init(B_FALSE);
+	rc_hardware_init(false);
 	
 	if(rc_dev.channel != NULL)
 	{

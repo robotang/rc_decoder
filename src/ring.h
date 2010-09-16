@@ -7,10 +7,10 @@
 #ifndef _RING_H
 #define _RING_H
 
-#include "config.h"
+//#include "config.h"
 
-typedef uint16_t ring_size_t;
-
+//typedef uint16_t ring_size_t;
+typedef unsigned int ring_size_t;
 
 /* Define ring buffer structure.  Unfortunately, since we need to
    statically allocate this structure we cannot make the structure
