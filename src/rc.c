@@ -1,25 +1,24 @@
 /*
-	ENEL675 - Advanced Embedded Systems
-	File: 		rc.c
-	Author: 	rct42 jrh97
-	Date:  		11 September 2010
-	Description:	Creates a kernel module (/dev/rc) which decodes a PPM 
-			signal. The hardware is of an omap board, such as a 
-			gumstix or a beagleboard SBC. It currently uses 
-			GPIO_144.
-			
-			The module works by using interrupts and timestamping 
-			with an internal timer. Firstly, it automatically 
-			detects the number of channels in the PPM signal, and 
-			then decodes the signal. Each time the module is read, 
-			It puts the status ("OK", LOST", or "REALLY_LOST"),
-			followed by the value of each channel, separated with
-			 a space, and null terminated. . e.g. (using a test 
-			 signal): "cat /dev/rc returns" 
-			 OK 102 199 295 392 488 585 681 777
+    ENEL675 - Advanced Embedded Systems
+    File: 		rc.c
+    Authors: 	        Robert Tang, John Howe
+    Date:  		11 September 2010
 
-			TODO: Right now it assumes SYS_CLK = 13MHz. Fix this assumption!
-			TODO: Test on a proper PPM signal
+        Creates a kernel module (/dev/rc) which decodes a PPM signal.
+        The hardware is of an omap board, such as a gumstix or a
+        beagleboard SBC. It currently uses GPIO_144.
+
+        The module works by using interrupts and timestamping with an
+        internal timer. Firstly, it automatically detects the number of
+        channels in the PPM signal, and then decodes the signal. Each
+        time the module is read, It puts the status ("OK", LOST", or
+        "REALLY_LOST"), followed by the value of each channel, separated
+        with a space, and null terminated. . e.g. (using a test signal):
+        "cat /dev/rc returns" OK 102 199 295 392 488 585 681 777
+
+        TODO: Right now it assumes SYS_CLK = 13MHz. Fix this assumption!
+        TODO: Test on a proper PPM signal
+
 */
 
 #include <linux/init.h>
@@ -93,15 +92,15 @@ static ssize_t rc_read(struct file * file, char * buf, size_t count, loff_t *ppo
 	j = strlen(rc_dev.user_buff);
 	if(rc_dev.lost_counter == 0)
 	{
-		snprintf(rc_dev.user_buff + j, USER_BUFF_SIZE, "OK ");
+		snprintf(rc_dev.user_buff + j, USER_BUFF_SIZE, "RC_OK ");
 	}
 	else if(rc_dev.lost_counter < REALLY_LOST)
 	{
-		snprintf(rc_dev.user_buff + j, USER_BUFF_SIZE, "LOST ");
+		snprintf(rc_dev.user_buff + j, USER_BUFF_SIZE, "RC_LOST ");
 	}
 	else /* REALLY_LOST */
 	{
-		snprintf(rc_dev.user_buff + j, USER_BUFF_SIZE, "REALLY_LOST ");
+		snprintf(rc_dev.user_buff + j, USER_BUFF_SIZE, "RC_REALLY_LOST ");
 	}
 	
 	/* Values */
