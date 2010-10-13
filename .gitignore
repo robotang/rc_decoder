@@ -6,3 +6,4 @@
 *.mod.c
 *.order
 Module.symvers
+tags

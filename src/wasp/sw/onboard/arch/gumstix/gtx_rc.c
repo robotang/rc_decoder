@@ -70,6 +70,7 @@ file rc.h
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "std.h"
 #include "rc.h"
@@ -86,32 +87,41 @@ FILE* fp_dev;
 
 void rc_init ( void )
 {
-    rc_dev = fopen ("RC_DEV_NAME", "r");
-    if (rc_dev)
+    fp_dev = fopen ("FP_DEV_NAME", "r");
+    if (fp_dev)
     {
-        led_log ("Opened RC_DEV_NAME\n");
+        led_log ("Opened FP_DEV_NAME\n");
         rc_system_status = STATUS_INITIALIZED; // Should we be doing this?
     }
     else
     {
-        led_log ("Failed to open RC_DEV_NAME\n");
+        led_log ("Failed to open FP_DEV_NAME\n");
         rc_system_status = STATUS_FAIL;
     }
 }
 
 void rc_periodic_task ( void )
 {
-    char line [RC_LINE_WIDTH]; 
-    char *token;
+    char line [FP_LINE_WIDTH]; 
     int channel = 0;
     if (fgets (line, sizeof (line), fp_dev)) 
     {
-        char *ppm_pw;
-        rc_status = strtok (line, " "); // Does enum_t = char* work?
-        while ((ppm_pw = strtok (NULL, " ")) != NULL)
+        char *token;
+
+        /* Is there a better way to do this? */
+        token = strtok (line, " ");
+        if (strcmp (token, "RC_OK"))
+            rc_status = RC_OK;
+        else if (strcmp (token, "RC_LOST"))
+            rc_status = RC_LOST;
+        else
+            rc_status = RC_REALLY_LOST;
+
+        while ((token = strtok (NULL, " ")) != NULL)
         {
             // TODO rc_values[channel] = ...   How do we do this? 
-            ppm_pulses[channel++] = atoi(ppm_pw);
+            ppm_pulses[channel] = atoi(token);
+            channel ++;
         }
     }
 }
