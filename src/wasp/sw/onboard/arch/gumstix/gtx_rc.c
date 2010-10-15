@@ -119,8 +119,8 @@ void rc_periodic_task ( void )
 
         while ((token = strtok (NULL, " ")) != NULL)
         {
-            // TODO rc_values[channel] = ...   How do we do this? 
             ppm_pulses[channel] = atoi(token);
+            NormalizePpm();
             channel ++;
         }
     }
