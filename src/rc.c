@@ -46,14 +46,16 @@
 #define RC_PAD_NUM				144
 #define RC_PAD_BASE				OMAP34XX_GPIO5_REG_BASE /* Note: RC_PAD is GPIO_144 -> GPIO group 5 */
 
-#define PPM_START_MIN_10US			1000 /* i.e. 10ms. TODO: This value may need to be adjusted */			
-#define PPM_START_MAX_10US			4000 /* i.e. 40ms, TODO: This value may need to be adjusted */			
+#define PPM_START_MIN_10US			600 /* i.e. 6ms. TODO: This value may need to be adjusted */			
+#define PPM_START_MAX_10US			1000 /* i.e. 10ms, TODO: This value may need to be adjusted */			
 #define PRESCALE_DIV32				32
 #define TIMER_PRESCALE_DIV32			4 
 
 #define USER_BUFF_SIZE				128
 
-#define REALLY_LOST				5 /*TODO: This value may need to be adjusted */
+#define REALLY_LOST				2 /*TODO: This value may need to be adjusted */
+
+#define SUCCESS					0
 
 typedef enum {DETECT_CHANNELS = 0, DECODE_PPM } rc_mode_t;
 
@@ -77,12 +79,15 @@ typedef struct
 	rc_channel_t *channel; /* Dynamically allocated */
 	rc_mode_t mode;
 	char user_buff[USER_BUFF_SIZE];
+
+	int major;
+	int device_open;
 } rc_dev_t;
 
 /* local variables */
 static rc_dev_t rc_dev;
 
-static ssize_t rc_read(struct file * file, char * buf, size_t count, loff_t *ppos)
+static ssize_t rc_read(struct file *file, char *buf, size_t count, loff_t *ppos)
 {	 
 	int len, i, j;
 	
@@ -112,6 +117,9 @@ static ssize_t rc_read(struct file * file, char * buf, size_t count, loff_t *ppo
 		snprintf(rc_dev.user_buff + j, USER_BUFF_SIZE, "%d ", val);
 	}
 	
+	j = strlen(rc_dev.user_buff);
+	snprintf(rc_dev.user_buff + j, USER_BUFF_SIZE, "\n");
+	
 	len = strlen(rc_dev.user_buff);
 	if(count < len)
 		return -EINVAL;
@@ -124,18 +132,47 @@ static ssize_t rc_read(struct file * file, char * buf, size_t count, loff_t *ppo
 	return len;
 }
 
+static ssize_t rc_write(struct file *file, char *buf, size_t count, loff_t *ppos)
+{
+	printk(KERN_ERR "write operation is unsupported");
+	return -EINVAL;
+}
+
+static int rc_open(struct inode *inode, struct file *file)
+{
+	printk(KERN_ERR "%d \n", __LINE__);
+	if(rc_dev.device_open)
+		return -EBUSY;
+	
+	rc_dev.device_open = 1;
+	try_module_get(THIS_MODULE);
+	
+	printk(KERN_ERR "%d \n", __LINE__);	
+	
+	return SUCCESS;
+}
+
+static int rc_release(struct inode *inode, struct file *file)
+{
+	rc_dev.device_open = 0;
+	module_put(THIS_MODULE);
+	return SUCCESS;
+}
+
 static const struct file_operations rc_fops = 
 {
-	.owner = THIS_MODULE,
 	.read = rc_read,
+	.write = rc_write,
+	.open = rc_open,
+	.release = rc_release
 };
 
-static struct miscdevice rc_misc_dev = 
+/*static struct miscdevice rc_misc_dev = 
 {
 	MISC_DYNAMIC_MINOR,
 	RC_DEV_NAME,
 	&rc_fops
-};
+};*/
 
 static unsigned int delta_10us(void)
 {
@@ -310,15 +347,17 @@ static int rc_hardware_init(bool enable)
 		free_irq(rc_dev.ppm_irq, &rc_dev); 
 	}
 	
-	return 0;
+	return SUCCESS;
 }
 
 static int __init rc_init(void)
 {
-	unsigned int ret = misc_register(&rc_misc_dev);
-	if(ret)
+	int ret;
+	rc_dev.device_open = 0;
+	rc_dev.major = register_chrdev(0, RC_DEV_NAME, &rc_fops);
+	if(rc_dev.major < 0)
 	{
-		printk(KERN_ERR "Unable to register \"rc\" misc device\n");
+		printk(KERN_ERR "Unable to register \"rc\" character device\n");
 		return -1;
 	}
 	
@@ -332,12 +371,15 @@ static int __init rc_init(void)
 	/* Setup hardware */
 	ret = rc_hardware_init(true);
 	
+	printk(KERN_ERR "%d \n", __LINE__);
+	
 	return ret;
 }
 
 static void __exit rc_exit(void)
 {
-	misc_deregister(&rc_misc_dev);	
+	unregister_chrdev(rc_dev.major, RC_DEV_NAME);
+	
 	/* Return RC_PAD to its original state */
 	rc_hardware_init(false);
 	
