@@ -80,8 +80,8 @@ typedef struct
 	rc_mode_t mode;
 	char user_buff[USER_BUFF_SIZE];
 
-	int major;
-	int device_open;
+	dev_t devt;
+	struct cdev cdev;
 } rc_dev_t;
 
 /* local variables */
@@ -132,39 +132,10 @@ static ssize_t rc_read(struct file *file, char *buf, size_t count, loff_t *ppos)
 	return len;
 }
 
-static ssize_t rc_write(struct file *file, char *buf, size_t count, loff_t *ppos)
-{
-	printk(KERN_ERR "write operation is unsupported");
-	return -EINVAL;
-}
-
-static int rc_open(struct inode *inode, struct file *file)
-{
-	printk(KERN_ERR "%d \n", __LINE__);
-	if(rc_dev.device_open)
-		return -EBUSY;
-	
-	rc_dev.device_open = 1;
-	try_module_get(THIS_MODULE);
-	
-	printk(KERN_ERR "%d \n", __LINE__);	
-	
-	return SUCCESS;
-}
-
-static int rc_release(struct inode *inode, struct file *file)
-{
-	rc_dev.device_open = 0;
-	module_put(THIS_MODULE);
-	return SUCCESS;
-}
-
 static const struct file_operations rc_fops = 
 {
-	.read = rc_read,
-	.write = rc_write,
-	.open = rc_open,
-	.release = rc_release
+	.owner = THIS_MODULE,
+	.read = rc_read
 };
 
 /*static struct miscdevice rc_misc_dev = 
@@ -352,15 +323,26 @@ static int rc_hardware_init(bool enable)
 
 static int __init rc_init(void)
 {
-	int ret;
-	rc_dev.device_open = 0;
-	rc_dev.major = register_chrdev(0, RC_DEV_NAME, &rc_fops);
-	if(rc_dev.major < 0)
+	int error, ret;
+	rc_dev.devt = MKDEV(0, 0);
+	error = alloc_chrdev_region(&rc_dev.devt, 0, 1, RC_DEV_NAME);
+	if(error < 0) 
 	{
-		printk(KERN_ERR "Unable to register \"rc\" character device\n");
+		printk(KERN_ALERT "alloc_chrdev_region() failed: error = %d \n", error);
 		return -1;
 	}
 	
+	cdev_init(&rc_dev.cdev, &rc_fops);
+	rc_dev.cdev.owner = THIS_MODULE;
+	
+	error = cdev_add(&rc_dev.cdev, rc_dev.devt, 1);
+	if(error) 
+	{
+		printk(KERN_ALERT "cdev_add() failed: error = %d\n", error);
+		cdev_del(&rc_dev.cdev);	
+		return -1;
+	}	
+
 	/* Setup rc_dev structure */
 	rc_dev.ppm_irq = gpio_to_irq(RC_PAD_NUM);
 	rc_dev.num_channels = 0;
@@ -378,7 +360,8 @@ static int __init rc_init(void)
 
 static void __exit rc_exit(void)
 {
-	unregister_chrdev(rc_dev.major, RC_DEV_NAME);
+	cdev_del(&rc_dev.cdev);
+	unregister_chrdev_region(rc_dev.devt, 1);
 	
 	/* Return RC_PAD to its original state */
 	rc_hardware_init(false);
