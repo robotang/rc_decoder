@@ -71,6 +71,10 @@ file rc.h
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #include "std.h"
 #include "rc.h"
@@ -83,33 +87,40 @@ file rc.h
 #define FP_LINE_WIDTH   128
 
 SystemStatus_t rc_system_status = STATUS_UNINITIAIZED;
-FILE* fp_dev;
+
+int fp_dev; 
 
 void rc_init ( void )
 {
-    fp_dev = fopen ("FP_DEV_NAME", "r");
-    if (fp_dev)
+    fp_dev = open(FP_DEV_NAME, O_RDONLY);
+    if(fp_dev != -1)
     {
-        led_log ("Opened FP_DEV_NAME\n");
+        led_log ("Opened %s\n", FP_DEV_NAME);
         rc_system_status = STATUS_INITIALIZED; // Should we be doing this?
     }
     else
     {
-        led_log ("Failed to open FP_DEV_NAME\n");
+        led_log ("Failed to open %s\n", FP_DEV_NAME);
         rc_system_status = STATUS_FAIL;
     }
 }
 
 void rc_periodic_task ( void )
-{
-    char line [FP_LINE_WIDTH]; 
-    int channel = 0;
-    if (fgets (line, sizeof (line), fp_dev)) 
+{ 
+    int channel = 0, len;
+    static int i = 0;
+    char line [FP_LINE_WIDTH];
+    i++;
+    
+    if(i > 2)
+    {
+    i = 0;
+    lseek(fp_dev, 0, SEEK_SET);
+    len = read(fp_dev, line, FP_LINE_WIDTH);
+    if (len > 0)
     {
         char *token;
-
-        /* Is there a better way to do this? */
-        token = strtok (line, " ");
+        token = strtok (line, ",");
         if (strcmp (token, "RC_OK"))
             rc_status = RC_OK;
         else if (strcmp (token, "RC_LOST"))
@@ -117,12 +128,17 @@ void rc_periodic_task ( void )
         else
             rc_status = RC_REALLY_LOST;
 
-        while ((token = strtok (NULL, " ")) != NULL)
+        while ((token = strtok (NULL, ",")) != NULL)
         {
             ppm_pulses[channel] = atoi(token);
-            NormalizePpm();
-            channel ++;
+            printf("%d ", ppm_pulses[channel]);
+
+            //NormalizePpm();
+            channel++;
         }
+        
+        printf("\n");
+    }
     }
 }
 
@@ -131,3 +147,4 @@ bool_t rc_event_task ( void )
     /* See docs, return true if valid */
     return (rc_status == RC_OK);
 }
+
