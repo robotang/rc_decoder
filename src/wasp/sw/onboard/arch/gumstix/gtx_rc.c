@@ -89,6 +89,7 @@ file rc.h
 SystemStatus_t rc_system_status = STATUS_UNINITIAIZED;
 
 int fp_dev; 
+int ThisNormalizePpm(int val);
 
 void rc_init ( void )
 {
@@ -108,13 +109,8 @@ void rc_init ( void )
 void rc_periodic_task ( void )
 { 
     int channel = 0, len;
-    static int i = 0;
     char line [FP_LINE_WIDTH];
-    i++;
     
-    if(i > 2)
-    {
-    i = 0;
     lseek(fp_dev, 0, SEEK_SET);
     len = read(fp_dev, line, FP_LINE_WIDTH);
     if (len > 0)
@@ -131,14 +127,9 @@ void rc_periodic_task ( void )
         while ((token = strtok (NULL, ",")) != NULL)
         {
             ppm_pulses[channel] = atoi(token);
-            printf("%d ", ppm_pulses[channel]);
-
-            //NormalizePpm();
+            rc_values[channel] = ThisNormalizePpm(ppm_pulses[channel]);
             channel++;
         }
-        
-        printf("\n");
-    }
     }
 }
 
@@ -146,5 +137,22 @@ bool_t rc_event_task ( void )
 {
     /* See docs, return true if valid */
     return (rc_status == RC_OK);
+}
+
+#define MIN_PULSE_LIMIT    50
+#define MAX_PULSE_LIMIT    250
+#define NEUTRAL_PULSE      150
+int ThisNormalizePpm(int val)
+{
+    int ret = val - NEUTRAL_PULSE;
+    if(ret > 0)
+    {
+        ret *= (9600 / MAX_PULSE_LIMIT);
+    }
+    else
+    {
+        ret *= (9600 / MIN_PULSE_LIMIT);
+    }
+    return ret;
 }
 
