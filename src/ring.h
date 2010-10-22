@@ -140,5 +140,6 @@ ring_getc (ring_t *ring)
     return c;
 }
 
+ring_size_t ring_write_safe (ring_t *ring, const void *buffer, ring_size_t size);
 
 #endif

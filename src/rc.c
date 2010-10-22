@@ -30,6 +30,7 @@
 #include <linux/gpio.h>
 #include <linux/clk.h>	
 #include <linux/miscdevice.h>
+#include <linux/jiffies.h>
 #include <mach/gpio.h>
 #include <plat/dmtimer.h>
 #include <asm/io.h>
@@ -38,6 +39,9 @@
 #include <linux/sched.h>
 #include "rc.h"
 #include "ring.h"
+
+#define JIFFIES_TO_MILLISECONDS(x)		(((x) * 1000) / HZ)
+#define MAX_CHANNELS				20 
 
 #define RC_DEV_NAME				"rc"
 #define RC_PAD_ADDR				(0x2174 + 0x48000000 - OMAP34XX_PADCONF_START) /* This is GPIO_144 */
@@ -89,11 +93,11 @@ static ssize_t rc_read(struct file *file, char *buf, size_t count, loff_t *ppos)
 
 	/* Status */
 	j = strlen(rc_dev.user_buff);
-	if(rc_dev.lost_counter == 0)
+	if(rc_dev.lost_counter == 0 && rc_dev.num_channels && rc_dev.mode != DETECT_CHANNELS)
 	{
 		snprintf(rc_dev.user_buff + j, USER_BUFF_SIZE, "RC_OK");
 	}
-	else if(rc_dev.lost_counter < REALLY_LOST)
+	else if(rc_dev.lost_counter < REALLY_LOST && rc_dev.num_channels && rc_dev.mode != DETECT_CHANNELS)
 	{
 		snprintf(rc_dev.user_buff + j, USER_BUFF_SIZE, "RC_LOST");
 	}
@@ -105,7 +109,7 @@ static ssize_t rc_read(struct file *file, char *buf, size_t count, loff_t *ppos)
 	/* Values */
 	if(rc_dev.num_channels && rc_dev.lost_counter == 0)
 	{
-		if(ring_read_num(&rc_dev.channel[0].ring) && ring_read_num(&rc_dev.channel[rc_dev.num_channels-1].ring))
+		if(!ring_empty_p(&rc_dev.channel[0].ring) && !ring_empty_p(&rc_dev.channel[rc_dev.num_channels-1].ring))
 		{
 			for(i = 0; i < rc_dev.num_channels; i++)
 			{
@@ -116,9 +120,11 @@ static ssize_t rc_read(struct file *file, char *buf, size_t count, loff_t *ppos)
 			}
 		}
 	}
+	
+	/* New line character */
 	j = strlen(rc_dev.user_buff);
 	snprintf(rc_dev.user_buff + j, USER_BUFF_SIZE, "\n");
-	//printk(KERN_ERR "%s", rc_dev.user_buff);
+	
 	len = strlen(rc_dev.user_buff);
 	
 	if(count < len)
@@ -149,7 +155,6 @@ static struct miscdevice rc_misc_dev =
 static unsigned int delta_10us(void)
 {
 	unsigned int reg = omap_dm_timer_read_counter(rc_dev.timer_ptr) - rc_dev.timer_zero_val;
-	//printk("reg: %d\n", reg);
 	omap_dm_timer_write_counter(rc_dev.timer_ptr, rc_dev.timer_zero_val);
 
 	return reg >> 2; /* Approx (actually should be divided by 4.0625 rather than 4! Note 13MHz/DIV32 = 406250Hz */
@@ -179,10 +184,11 @@ static irqreturn_t ppm_interrupt_handler(int irq, void *dev_id)
 		{
 			kfree(rc_dev.channel);
 			rc_dev.channel = NULL;
-		}		
+		}
 		rc_dev.mode = DETECT_CHANNELS;
 	}
 
+	//printk(KERN_ERR "pulse: %d\n", pulse);
 	if(rc_dev.mode == DETECT_CHANNELS)
 	{
 		if(dt > PPM_START_MIN_10US && dt < PPM_START_MAX_10US) /* Have received a start pulse */
@@ -224,7 +230,7 @@ static irqreturn_t ppm_interrupt_handler(int irq, void *dev_id)
 		}
 		else if(pulse < rc_dev.num_channels)
 		{
-			ring_write(&rc_dev.channel[pulse++].ring, &dt, sizeof(dt));
+			ring_write_safe(&rc_dev.channel[pulse++].ring, &dt, sizeof(dt));
 		}
 	}
 

@@ -5,6 +5,7 @@
 */
 
 #include <linux/string.h>
+#include <linux/slab.h> /* kmalloc, kfree etc */
 #include "ring.h"
 
 /** Define some useful macros for determining number of entries in
@@ -163,5 +164,24 @@ ring_write (ring_t *ring, const void *buffer, ring_size_t size)
         ring->in += size;
     }
     return size;
+}
+
+ring_size_t ring_write_safe (ring_t *ring, const void *buffer, ring_size_t size)
+{
+	int tmp;
+	ring_size_t count = RING_WRITE_NUM (ring, tmp);
+	if(count < size)
+	{	
+		void *del = NULL;
+		if((del = kmalloc(size, GFP_KERNEL)) == NULL)
+		{
+			printk(KERN_ERR "malloc failed %d\n", __LINE__);
+		}
+		
+		ring_read (ring, del, size);
+		if(del != NULL)
+			kfree(del);
+	}
+	return ring_write(ring, buffer, size);
 }
 

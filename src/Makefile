@@ -14,5 +14,8 @@ default:
 clean:
 	rm -rf *.o *.ko *.mod.* Module.* .hello* .tmp* modules.order
 
+install:
+	make && scp rc_decoder.ko root@192.168.1.6:~/ENEL675/rc
+
 endif
 
