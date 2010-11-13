@@ -172,15 +172,8 @@ ring_size_t ring_write_safe (ring_t *ring, const void *buffer, ring_size_t size)
 	ring_size_t count = RING_WRITE_NUM (ring, tmp);
 	if(count < size)
 	{	
-		void *del = NULL;
-		if((del = kmalloc(size, GFP_KERNEL)) == NULL)
-		{
-			printk(KERN_ERR "malloc failed %d\n", __LINE__);
-		}
-		
-		ring_read (ring, del, size);
-		if(del != NULL)
-			kfree(del);
+		for(tmp = 0; tmp < size; tmp++)
+			ring_getc(ring);
 	}
 	return ring_write(ring, buffer, size);
 }
